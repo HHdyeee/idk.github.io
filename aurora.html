@@ -1,0 +1,545 @@
+{\rtf1\ansi\ansicpg936\cocoartf2870
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 <!DOCTYPE html>\
+<html lang="en">\
+<head>\
+<meta charset="UTF-8" />\
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />\
+<title></title>\
+<style>\
+html, body \{\
+  margin: 0;\
+  padding: 0;\
+  width: 100%;\
+  height: 100%;\
+  overflow: hidden;\
+  background: #02070d;\
+\}\
+body \{\
+  opacity: 0;\
+  animation: fadeIn 2.8s ease forwards;\
+\}\
+canvas \{\
+  display: block;\
+  width: 100%;\
+  height: 100%;\
+\}\
+@keyframes fadeIn \{\
+  from \{ opacity: 0; \}\
+  to \{ opacity: 1; \}\
+\}\
+</style>\
+</head>\
+<body>\
+<canvas id="aurora"></canvas>\
+\
+<script>\
+(function () \{\
+  "use strict";\
+\
+  const canvas = document.getElementById("aurora");\
+  const ctx = canvas.getContext("2d");\
+\
+  let w = 0;\
+  let h = 0;\
+  let dpr = 1;\
+  let stars = [];\
+  let ground = [];\
+  let shootingStar = null;\
+  let nextMeteorAt = 0;\
+\
+  const bands = [\
+    \{\
+      base: 0.18,\
+      amp: 0.064,\
+      depth: 0.36,\
+      alpha: 0.31,\
+      phase: 0.3,\
+      lean: -7,\
+      green: [120, 255, 200],\
+      cyan: [125, 228, 255],\
+      violet: [176, 155, 255]\
+    \},\
+    \{\
+      base: 0.24,\
+      amp: 0.076,\
+      depth: 0.42,\
+      alpha: 0.26,\
+      phase: 1.8,\
+      lean: 9,\
+      green: [100, 255, 190],\
+      cyan: [112, 238, 255],\
+      violet: [172, 150, 255]\
+    \},\
+    \{\
+      base: 0.31,\
+      amp: 0.054,\
+      depth: 0.30,\
+      alpha: 0.18,\
+      phase: 3.7,\
+      lean: -3,\
+      green: [130, 246, 186],\
+      cyan: [120, 212, 255],\
+      violet: [168, 150, 245]\
+    \}\
+  ];\
+\
+  function resize() \{\
+    dpr = Math.min(window.devicePixelRatio || 1, 2);\
+    w = window.innerWidth;\
+    h = window.innerHeight;\
+\
+    canvas.width = Math.floor(w * dpr);\
+    canvas.height = Math.floor(h * dpr);\
+    canvas.style.width = w + "px";\
+    canvas.style.height = h + "px";\
+\
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);\
+\
+    makeStars();\
+    makeGround();\
+  \}\
+\
+  function makeStars() \{\
+    stars = [];\
+    const count = Math.max(110, Math.min(340, Math.floor(w * h / 8200)));\
+\
+    for (let i = 0; i < count; i++) \{\
+      stars.push(\{\
+        x: Math.random() * w,\
+        y: Math.random() * h * 0.70,\
+        r: Math.random() * 1.45 + 0.2,\
+        a: Math.random() * 0.55 + 0.15,\
+        tw: Math.random() * 0.0012 + 0.00025,\
+        ph: Math.random() * Math.PI * 2\
+      \});\
+    \}\
+  \}\
+\
+  function makeGround() \{\
+    ground = [];\
+    const n = 16;\
+    for (let i = 0; i <= n; i++) \{\
+      const x = (w / n) * i;\
+      const y =\
+        h * 0.84 +\
+        Math.sin(i * 0.75 + 0.8) * h * 0.018 +\
+        Math.sin(i * 1.9 + 1.6) * h * 0.008 +\
+        (i > 9 ? -h * 0.02 : 0) +\
+        (i < 3 ? h * 0.01 : 0);\
+      ground.push(\{ x, y \});\
+    \}\
+  \}\
+\
+  function sky() \{\
+    const g = ctx.createLinearGradient(0, 0, 0, h);\
+    g.addColorStop(0, "#02101d");\
+    g.addColorStop(0.26, "#072241");\
+    g.addColorStop(0.58, "#061729");\
+    g.addColorStop(1, "#02050a");\
+    ctx.fillStyle = g;\
+    ctx.fillRect(0, 0, w, h);\
+\
+    const glow = ctx.createRadialGradient(\
+      w * 0.50, h * 0.20, 0,\
+      w * 0.50, h * 0.20, w * 0.78\
+    );\
+    glow.addColorStop(0, "rgba(0,170,255,0.07)");\
+    glow.addColorStop(1, "rgba(0,0,0,0)");\
+    ctx.fillStyle = glow;\
+    ctx.fillRect(0, 0, w, h);\
+  \}\
+\
+  function drawStars(time) \{\
+    for (const s of stars) \{\
+      const a = s.a + Math.sin(time * s.tw + s.ph) * 0.18;\
+      ctx.beginPath();\
+      ctx.fillStyle = `rgba(235,245,255,$\{Math.max(0.04, Math.min(0.95, a))\})`;\
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);\
+      ctx.fill();\
+    \}\
+  \}\
+\
+  function fbm(x, t, p) \{\
+    return (\
+      Math.sin(x * 0.010 + p + t * 0.00008) * 0.50 +\
+      Math.sin(x * 0.022 - p * 1.4 - t * 0.00005) * 0.28 +\
+      Math.sin(x * 0.047 + p * 2.2 + t * 0.00012) * 0.14 +\
+      Math.sin(x * 0.090 - p * 0.7 + t * 0.00018) * 0.08\
+    );\
+  \}\
+\
+  function curveY(x, time, band) \{\
+    const nx = x / w;\
+    const broad =\
+      Math.sin(nx * Math.PI * 1.05 + band.phase + time * 0.000015) * 0.75 +\
+      Math.sin(nx * Math.PI * 2.4 - band.phase * 0.6) * 0.25;\
+\
+    const fine = fbm(x, time, band.phase);\
+    return h * band.base + broad * h * band.amp + fine * h * band.amp * 0.55;\
+  \}\
+\
+  function curtainLength(x, time, band) \{\
+    const nx = x / w;\
+    const l =\
+      0.52 +\
+      Math.sin(nx * Math.PI * 2.2 + band.phase + time * 0.00005) * 0.18 +\
+      Math.sin(nx * Math.PI * 5.8 - band.phase * 1.2 - time * 0.00008) * 0.10 +\
+      fbm(x + 200, time, band.phase + 1.7) * 0.12;\
+\
+    return Math.max(h * band.depth * 0.38, h * band.depth * l);\
+  \}\
+\
+  function foldStrength(x, time, band) \{\
+    const nx = x / w;\
+    const f =\
+      0.55 +\
+      Math.sin(nx * Math.PI * 7.2 + time * 0.00026 + band.phase * 1.8) * 0.20 +\
+      Math.sin(nx * Math.PI * 14.5 - time * 0.00016 + band.phase) * 0.10 +\
+      fbm(x + 500, time * 1.2, band.phase + 3) * 0.10;\
+    return Math.max(0.15, f);\
+  \}\
+\
+  function drawAuroraGlow(time, band) \{\
+    const step = 10;\
+    const top = [];\
+    const bottom = [];\
+\
+    for (let x = -step; x <= w + step; x += step) \{\
+      const y = curveY(x, time, band);\
+      const len = curtainLength(x, time, band);\
+      top.push(\{ x, y \});\
+      bottom.push(\{ x, y: y + len \});\
+    \}\
+\
+    ctx.save();\
+    ctx.globalCompositeOperation = "screen";\
+    ctx.filter = `blur($\{Math.max(30, w * 0.018)\}px)`;\
+\
+    const g = ctx.createLinearGradient(0, h * 0.08, 0, h * 0.80);\
+    g.addColorStop(0, `rgba($\{band.cyan[0]\},$\{band.cyan[1]\},$\{band.cyan[2]\},0)`);\
+    g.addColorStop(0.15, `rgba($\{band.violet[0]\},$\{band.violet[1]\},$\{band.violet[2]\},$\{band.alpha * 0.18\})`);\
+    g.addColorStop(0.30, `rgba($\{band.cyan[0]\},$\{band.cyan[1]\},$\{band.cyan[2]\},$\{band.alpha * 0.45\})`);\
+    g.addColorStop(0.46, `rgba($\{band.green[0]\},$\{band.green[1]\},$\{band.green[2]\},$\{band.alpha * 1.05\})`);\
+    g.addColorStop(0.72, `rgba($\{band.green[0]\},$\{band.green[1]\},$\{band.green[2]\},$\{band.alpha * 0.22\})`);\
+    g.addColorStop(1, `rgba($\{band.green[0]\},$\{band.green[1]\},$\{band.green[2]\},0)`);\
+\
+    ctx.beginPath();\
+    ctx.moveTo(top[0].x, top[0].y);\
+\
+    for (let i = 1; i < top.length; i++) \{\
+      const px = top[i - 1].x;\
+      const py = top[i - 1].y;\
+      const cx = top[i].x;\
+      const cy = top[i].y;\
+      const mx = (px + cx) / 2;\
+      const my = (py + cy) / 2;\
+      ctx.quadraticCurveTo(px, py, mx, my);\
+    \}\
+\
+    for (let i = bottom.length - 1; i >= 0; i--) \{\
+      ctx.lineTo(bottom[i].x, bottom[i].y);\
+    \}\
+\
+    ctx.closePath();\
+    ctx.fillStyle = g;\
+    ctx.fill();\
+\
+    ctx.restore();\
+  \}\
+\
+  function drawAuroraCurtains(time, band) \{\
+    const step = Math.max(2, Math.floor(w / 430));\
+    const breathe = 0.92 + Math.sin(time * 0.00018 + band.phase) * 0.10;\
+\
+    ctx.save();\
+    ctx.globalCompositeOperation = "screen";\
+    ctx.lineCap = "round";\
+\
+    for (let x = 0; x <= w; x += step) \{\
+      const y0 = curveY(x, time, band);\
+      const len = curtainLength(x, time, band);\
+      const fold = foldStrength(x, time, band);\
+\
+      const sway =\
+        band.lean +\
+        Math.sin(x * 0.012 + time * 0.00032 + band.phase) * 4 +\
+        Math.sin(x * 0.025 - time * 0.00019 + band.phase * 0.7) * 2;\
+\
+      const alpha = band.alpha * fold * breathe;\
+      const violetAlpha = alpha * 0.33;\
+      const edgeAlpha = alpha * 0.62;\
+      const coreAlpha = alpha * 1.06;\
+\
+      const g = ctx.createLinearGradient(x, y0, x + sway, y0 + len);\
+      g.addColorStop(0, `rgba($\{band.violet[0]\},$\{band.violet[1]\},$\{band.violet[2]\},0)`);\
+      g.addColorStop(0.10, `rgba($\{band.violet[0]\},$\{band.violet[1]\},$\{band.violet[2]\},$\{violetAlpha\})`);\
+      g.addColorStop(0.22, `rgba($\{band.cyan[0]\},$\{band.cyan[1]\},$\{band.cyan[2]\},$\{edgeAlpha\})`);\
+      g.addColorStop(0.48, `rgba($\{band.green[0]\},$\{band.green[1]\},$\{band.green[2]\},$\{coreAlpha\})`);\
+      g.addColorStop(0.76, `rgba($\{band.green[0]\},$\{band.green[1]\},$\{band.green[2]\},$\{edgeAlpha * 0.58\})`);\
+      g.addColorStop(1, `rgba($\{band.green[0]\},$\{band.green[1]\},$\{band.green[2]\},0)`);\
+\
+      ctx.strokeStyle = g;\
+      ctx.lineWidth = 1.05 + fold * 1.35;\
+      ctx.filter = `blur($\{1.1 + fold * 0.8\}px)`;\
+\
+      ctx.beginPath();\
+      ctx.moveTo(x, y0);\
+      ctx.lineTo(x + sway, y0 + len);\
+      ctx.stroke();\
+    \}\
+\
+    ctx.restore();\
+  \}\
+\
+  function drawAuroraEdge(time, band) \{\
+    const step = 8;\
+\
+    ctx.save();\
+    ctx.globalCompositeOperation = "screen";\
+    ctx.filter = "blur(4px)";\
+    ctx.lineWidth = 2.2;\
+    ctx.strokeStyle = `rgba($\{band.green[0]\},$\{band.green[1]\},$\{band.green[2]\},$\{band.alpha * 1.06\})`;\
+\
+    ctx.beginPath();\
+    let first = true;\
+\
+    for (let x = 0; x <= w; x += step) \{\
+      const y = curveY(x, time, band) + Math.sin(x * 0.028 + time * 0.00025 + band.phase) * 1.5;\
+      if (first) \{\
+        ctx.moveTo(x, y);\
+        first = false;\
+      \} else \{\
+        ctx.lineTo(x, y);\
+      \}\
+    \}\
+\
+    ctx.stroke();\
+    ctx.restore();\
+  \}\
+\
+  function drawLowHorizonGlow(time) \{\
+    const pulse = 0.13 + Math.sin(time * 0.00014) * 0.025;\
+    const g = ctx.createLinearGradient(0, h * 0.70, 0, h * 0.90);\
+    g.addColorStop(0, "rgba(132,255,210,0)");\
+    g.addColorStop(0.42, `rgba(132,255,210,$\{pulse\})`);\
+    g.addColorStop(1, "rgba(132,255,210,0)");\
+    ctx.fillStyle = g;\
+    ctx.fillRect(0, h * 0.68, w, h * 0.24);\
+  \}\
+\
+  function drawSnowGround() \{\
+    ctx.save();\
+\
+    ctx.beginPath();\
+    ctx.moveTo(0, h);\
+    ctx.lineTo(0, ground[0].y);\
+    for (let i = 0; i < ground.length; i++) \{\
+      ctx.lineTo(ground[i].x, ground[i].y);\
+    \}\
+    ctx.lineTo(w, h);\
+    ctx.closePath();\
+\
+    const snow = ctx.createLinearGradient(0, h * 0.78, 0, h);\
+    snow.addColorStop(0, "#eef6ff");\
+    snow.addColorStop(0.24, "#d9e7f5");\
+    snow.addColorStop(0.58, "#b8cadc");\
+    snow.addColorStop(1, "#8ea3b8");\
+    ctx.fillStyle = snow;\
+    ctx.fill();\
+\
+    const shadow = ctx.createLinearGradient(0, h * 0.80, 0, h);\
+    shadow.addColorStop(0, "rgba(90,125,155,0.10)");\
+    shadow.addColorStop(1, "rgba(35,48,66,0.30)");\
+    ctx.fillStyle = shadow;\
+    ctx.fill();\
+\
+    ctx.restore();\
+\
+    ctx.save();\
+    ctx.beginPath();\
+    for (let i = 0; i < ground.length - 1; i++) \{\
+      const a = ground[i];\
+      const b = ground[i + 1];\
+      const mx = (a.x + b.x) / 2;\
+      const my = (a.y + b.y) / 2 + 10;\
+      if (i === 0) ctx.moveTo(a.x, a.y + 4);\
+      ctx.quadraticCurveTo(a.x, a.y + 10, mx, my);\
+      if (i === ground.length - 2) ctx.quadraticCurveTo(b.x, b.y + 10, b.x, b.y + 4);\
+    \}\
+    ctx.strokeStyle = "rgba(210,230,245,0.25)";\
+    ctx.lineWidth = 2;\
+    ctx.stroke();\
+    ctx.restore();\
+  \}\
+\
+  function groundYAt(x) \{\
+    if (ground.length < 2) return h * 0.84;\
+    for (let i = 0; i < ground.length - 1; i++) \{\
+      const a = ground[i];\
+      const b = ground[i + 1];\
+      if (x >= a.x && x <= b.x) \{\
+        const t = (x - a.x) / (b.x - a.x);\
+        return a.y + (b.y - a.y) * t;\
+      \}\
+    \}\
+    return ground[ground.length - 1].y;\
+  \}\
+\
+  function drawCamera() \{\
+    const x = w * 0.77;\
+    const y = groundYAt(x) - 3;\
+    const s = Math.max(0.95, Math.min(w, h) / 900);\
+\
+    ctx.save();\
+    ctx.fillStyle = "#11161d";\
+    ctx.strokeStyle = "#11161d";\
+    ctx.lineWidth = 2.2 * s;\
+    ctx.lineCap = "round";\
+    ctx.lineJoin = "round";\
+\
+    ctx.beginPath();\
+    ctx.moveTo(x, y);\
+    ctx.lineTo(x - 18 * s, y + 44 * s);\
+    ctx.moveTo(x, y);\
+    ctx.lineTo(x, y + 47 * s);\
+    ctx.moveTo(x, y);\
+    ctx.lineTo(x + 18 * s, y + 44 * s);\
+    ctx.stroke();\
+\
+    ctx.fillRect(x - 16 * s, y - 20 * s, 32 * s, 18 * s);\
+    ctx.fillRect(x - 7 * s, y - 28 * s, 14 * s, 8 * s);\
+\
+    ctx.beginPath();\
+    ctx.arc(x, y - 11 * s, 5.4 * s, 0, Math.PI * 2);\
+    ctx.fill();\
+\
+    ctx.beginPath();\
+    ctx.arc(x, y - 1.5 * s, 3.4 * s, 0, Math.PI * 2);\
+    ctx.fill();\
+\
+    ctx.restore();\
+  \}\
+\
+  function maybeSpawnMeteor(time) \{\
+    if (shootingStar) return;\
+    if (time < nextMeteorAt) return;\
+\
+    shootingStar = \{\
+      x: w * (0.55 + Math.random() * 0.28),\
+      y: h * (0.10 + Math.random() * 0.14),\
+      vx: -(8 + Math.random() * 3),\
+      vy: 3.0 + Math.random() * 1.6,\
+      life: 0,\
+      maxLife: 42 + Math.random() * 18\
+    \};\
+\
+    nextMeteorAt = time + 5000 + Math.random() * 7000;\
+  \}\
+\
+  function drawMeteor() \{\
+    if (!shootingStar) return;\
+\
+    const s = shootingStar;\
+    s.x += s.vx;\
+    s.y += s.vy;\
+    s.life += 1;\
+\
+    const p = s.life / s.maxLife;\
+    const alpha = Math.sin(Math.PI * p) * 0.95;\
+    const tail = 90;\
+\
+    ctx.save();\
+    ctx.globalCompositeOperation = "screen";\
+\
+    const grad = ctx.createLinearGradient(\
+      s.x - s.vx * 9,\
+      s.y - s.vy * 9,\
+      s.x,\
+      s.y\
+    );\
+    grad.addColorStop(0, "rgba(255,255,255,0)");\
+    grad.addColorStop(0.40, `rgba(195,220,255,$\{alpha * 0.45\})`);\
+    grad.addColorStop(1, `rgba(255,255,255,$\{alpha\})`);\
+\
+    ctx.strokeStyle = grad;\
+    ctx.lineWidth = 2.1;\
+    ctx.lineCap = "round";\
+    ctx.filter = "blur(0.8px)";\
+\
+    ctx.beginPath();\
+    ctx.moveTo(s.x - s.vx * 9, s.y - s.vy * 9);\
+    ctx.lineTo(s.x, s.y);\
+    ctx.stroke();\
+\
+    ctx.fillStyle = `rgba(255,255,255,$\{alpha\})`;\
+    ctx.beginPath();\
+    ctx.arc(s.x, s.y, 1.7, 0, Math.PI * 2);\
+    ctx.fill();\
+\
+    ctx.restore();\
+\
+    if (s.life >= s.maxLife || s.x < -tail || s.y > h * 0.8) \{\
+      shootingStar = null;\
+    \}\
+  \}\
+\
+  function drawMist() \{\
+    const g = ctx.createLinearGradient(0, h * 0.76, 0, h);\
+    g.addColorStop(0, "rgba(210,235,255,0)");\
+    g.addColorStop(1, "rgba(40,55,75,0.18)");\
+    ctx.fillStyle = g;\
+    ctx.fillRect(0, h * 0.76, w, h * 0.24);\
+  \}\
+\
+  function vignette() \{\
+    const g = ctx.createRadialGradient(\
+      w * 0.50, h * 0.38, w * 0.10,\
+      w * 0.50, h * 0.38, w * 0.80\
+    );\
+    g.addColorStop(0, "rgba(0,0,0,0)");\
+    g.addColorStop(0.72, "rgba(0,0,0,0.10)");\
+    g.addColorStop(1, "rgba(0,0,0,0.46)");\
+    ctx.fillStyle = g;\
+    ctx.fillRect(0, 0, w, h);\
+  \}\
+\
+  function frame(time) \{\
+    sky();\
+    drawStars(time);\
+\
+    for (let i = 0; i < bands.length; i++) \{\
+      drawAuroraGlow(time, bands[i]);\
+    \}\
+    for (let i = 0; i < bands.length; i++) \{\
+      drawAuroraCurtains(time, bands[i]);\
+    \}\
+    for (let i = 0; i < bands.length; i++) \{\
+      drawAuroraEdge(time, bands[i]);\
+    \}\
+\
+    drawLowHorizonGlow(time);\
+    maybeSpawnMeteor(time);\
+    drawMeteor();\
+    drawSnowGround();\
+    drawCamera();\
+    drawMist();\
+    vignette();\
+\
+    requestAnimationFrame(frame);\
+  \}\
+\
+  window.addEventListener("resize", resize);\
+  resize();\
+  nextMeteorAt = 2000 + Math.random() * 3000;\
+  requestAnimationFrame(frame);\
+\
+\})();\
+</script>\
+</body>\
+</html>}
