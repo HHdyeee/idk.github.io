@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#020914" />
+  <title></title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #020711; }
+    body { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+    .vignette {
+      position: fixed; inset: 0; pointer-events: none;
+      background: radial-gradient(ellipse at 50% 42%, transparent 28%, rgba(0, 4, 12, .15) 64%, rgba(0, 3, 9, .69) 116%);
+      mix-blend-mode: multiply;
+    }
+    .grain {
+      position: fixed; inset: -50%; width: 200%; height: 200%; pointer-events: none; opacity: .055;
+      background-image:
+        radial-gradient(circle at 15% 23%, #fff 0 .45px, transparent .65px),
+        radial-gradient(circle at 73% 61%, #fff 0 .35px, transparent .6px),
+        radial-gradient(circle at 42% 84%, #fff 0 .5px, transparent .75px);
+      background-size: 13px 17px, 19px 23px, 29px 31px;
+      animation: grain .28s steps(2) infinite;
+    }
+    @keyframes grain { 0% { transform: translate(0,0) } 25% { transform: translate(2%,-1%) } 50% { transform: translate(-1%,2%) } 75% { transform: translate(1%,1%) } }
+
+    .photo-dialog {
+      position: fixed; z-index: 10; inset: 0; display: grid; place-items: center; padding: 20px;
+      background: rgba(1, 5, 12, .76); backdrop-filter: blur(16px);
+    }
+    .photo-dialog[hidden] { display: none; }
+    .photo-card {
+      width: min(88vw, 760px); padding: clamp(8px, 1.5vw, 14px); border-radius: 10px;
+      background: #e9eef0; box-shadow: 0 30px 100px rgba(0,0,0,.6); transform: rotate(-.35deg);
+    }
+    .photo-card img { display: block; width: 100%; max-height: 70vh; object-fit: contain; background: #06101a; }
+    .photo-actions { display: flex; justify-content: center; gap: 18px; padding: 14px 4px 2px; }
+    .icon-button {
+      position: relative; width: 48px; height: 48px; padding: 0; border: 0; border-radius: 50%;
+      background: #17262d; box-shadow: inset 0 0 0 1px rgba(255,255,255,.13); cursor: pointer;
+    }
+    .icon-button:focus-visible { outline: 2px solid #7effc1; outline-offset: 3px; }
+    .icon-button.close::before, .icon-button.close::after {
+      content: ""; position: absolute; left: 14px; top: 23px; width: 20px; height: 2px; border-radius: 2px; background: #d8e3e6;
+    }
+    .icon-button.close::before { transform: rotate(45deg); }
+    .icon-button.close::after { transform: rotate(-45deg); }
+    .icon-button.save { background: #176645; }
+    .icon-button.save::before {
+      content: ""; position: absolute; left: 22px; top: 11px; width: 3px; height: 20px; border-radius: 2px; background: #e4fff0;
+    }
+    .icon-button.save::after {
+      content: ""; position: absolute; left: 15px; top: 20px; width: 14px; height: 14px;
+      border-right: 3px solid #e4fff0; border-bottom: 3px solid #e4fff0; transform: rotate(45deg);
+    }
+    .save-tray { position: absolute; left: 13px; bottom: 9px; width: 22px; height: 9px; border: 3px solid #e4fff0; border-top: 0; border-radius: 0 0 3px 3px; }
+
+    @media (prefers-reduced-motion: reduce) { .grain { animation: none; } }
+  </style>
+</head>
+<body>
+  <canvas id="scene" aria-label="冰岛雪原上舞动的极光，远处偶有流星，前景有一台架在三脚架上的相机"></canvas>
+  <div class="vignette"></div>
+  <div class="grain"></div>
+  <div id="photoDialog" class="photo-dialog" role="dialog" aria-modal="true" aria-label="保存照片" hidden>
+    <div class="photo-card">
+      <img id="photoPreview" alt="刚拍摄的极光照片" />
+      <div class="photo-actions">
+        <button id="discardPhoto" class="icon-button close" type="button" aria-label="不保存"></button>
+        <button id="savePhoto" class="icon-button save" type="button" aria-label="保存到相册"><i class="save-tray"></i></button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const canvas = document.getElementById('scene');
+      const ctx = canvas.getContext('2d', { alpha: false });
+      const photoCanvas = document.createElement('canvas');
+      const photoCtx = photoCanvas.getContext('2d');
+      const photoDialog = document.getElementById('photoDialog');
+      const photoPreview = document.getElementById('photoPreview');
+      const savePhoto = document.getElementById('savePhoto');
+      const discardPhoto = document.getElementById('discardPhoto');
+      const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      let w = 0, h = 0, dpr = 1, time = 0, last = performance.now();
+      let meteorClock = 7 + Math.random() * 8, shutterFlash = 0, cameraMode = false, photoFile = null, photoUrl = '';
+      const stars = [], meteors = [], snow = [], flakes = [];
+
+      const rand = (a, b) => a + Math.random() * (b - a);
+      const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+
+      function resize() {
+        dpr = Math.min(devicePixelRatio || 1, 2);
+        w = innerWidth; h = innerHeight;
+        canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+        photoCanvas.width = canvas.width; photoCanvas.height = canvas.height;
+        canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        makeStars(); makeSnow();
+      }
+
+      function makeStars() {
+        stars.length = 0;
+        const count = Math.floor(w * h / 5200);
+        for (let i = 0; i < count; i++) {
+          const y = Math.pow(Math.random(), 1.2) * h * .67;
+          stars.push({ x: Math.random() * w, y, r: rand(.25, 1.15), a: rand(.18, .9), tw: rand(.5, 2.4), ph: rand(0, 6.28), cool: Math.random() });
+        }
+      }
+
+      function makeSnow() {
+        snow.length = 0;
+        flakes.length = 0;
+        const count = Math.floor(w / 16);
+        for (let i = 0; i < count; i++) snow.push({ x: Math.random() * w, y: rand(h * .7, h), r: rand(.25, 1.3), a: rand(.05, .28), s: rand(.8, 2.4) });
+        const flakeCount = Math.floor(w * h / 8800);
+        for (let i = 0; i < flakeCount; i++) flakes.push({ x: Math.random() * w, y: Math.random() * h, r: rand(.52, 2.5), a: rand(.18, .66), vy: rand(12, 33), drift: rand(5, 17), phase: rand(0, Math.PI * 2), depth: rand(.45, 1.32) });
+      }
+
+      function sky() {
+        const g = ctx.createLinearGradient(0, 0, 0, h);
+        g.addColorStop(0, '#020716'); g.addColorStop(.46, '#061526'); g.addColorStop(.72, '#102a37'); g.addColorStop(1, '#b8d4d9');
+        ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+        const glow = ctx.createRadialGradient(w * .76, h * .58, 0, w * .76, h * .58, w * .48);
+        glow.addColorStop(0, 'rgba(33,102,107,.18)'); glow.addColorStop(1, 'rgba(1,9,20,0)');
+        ctx.fillStyle = glow; ctx.fillRect(0, 0, w, h);
+      }
+
+      function drawStars() {
+        ctx.save();
+        for (const s of stars) {
+          const a = s.a * (.72 + Math.sin(time * s.tw + s.ph) * .28);
+          ctx.fillStyle = s.cool > .8 ? `rgba(178,220,255,${a})` : `rgba(242,247,240,${a})`;
+          ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+          if (s.r > 1.03) { ctx.fillRect(s.x - 2.3, s.y, 4.6, .35); ctx.fillRect(s.x, s.y - 2.3, .35, 4.6); }
+        }
+        ctx.restore();
+      }
+
+      function auroraRibbon(index, yBase, amplitude, thickness, hue, speed, alpha) {
+        const segments = Math.max(80, Math.floor(w / 11));
+        const pts = [];
+        const drift = time * speed + index * 4.3;
+        for (let i = -3; i <= segments + 3; i++) {
+          const x = (i / segments) * w;
+          const nx = x / w;
+          const wave = Math.sin(nx * 7.4 + drift) * amplitude + Math.sin(nx * 17.2 - drift * .63) * amplitude * .26 + Math.cos(nx * 3.2 + drift * .3) * amplitude * .42;
+          const arch = -Math.sin(nx * Math.PI) * h * .055;
+          pts.push({ x, y: yBase + wave + arch });
+        }
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.filter = `blur(${Math.max(8, w * .008)}px)`;
+        for (let layer = 0; layer < 12; layer++) {
+          const depth = layer / 11;
+          const grad = ctx.createLinearGradient(0, yBase - amplitude * 1.8, 0, yBase + thickness);
+          grad.addColorStop(0, `hsla(${hue + 22},90%,70%,0)`);
+          grad.addColorStop(.28, `hsla(${hue + 8},92%,66%,${alpha * (1 - depth * .35)})`);
+          grad.addColorStop(.56, `hsla(${hue},94%,58%,${alpha * .56})`);
+          grad.addColorStop(1, `hsla(${hue - 16},88%,58%,0)`);
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.moveTo(pts[0].x, pts[0].y - layer * 2);
+          for (const p of pts) ctx.lineTo(p.x, p.y + Math.sin(p.x * .013 + layer) * layer * 1.1);
+          for (let i = pts.length - 1; i >= 0; i--) {
+            const p = pts[i];
+            const curtain = thickness * (.52 + .48 * Math.sin(p.x * .011 + drift + layer * .16) ** 2);
+            ctx.lineTo(p.x, p.y + curtain * (1 + depth * .33));
+          }
+          ctx.closePath(); ctx.fill();
+        }
+        ctx.filter = 'none';
+        ctx.strokeStyle = `hsla(${hue + 8},100%,78%,${alpha * .5})`; ctx.lineWidth = 1.2;
+        ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
+        ctx.restore();
+      }
+
+      function drawAurora() {
+        auroraRibbon(0, h * .18, h * .07, h * .27, 147, .21, .062);
+        auroraRibbon(1, h * .25, h * .055, h * .31, 126, -.16, .078);
+        auroraRibbon(2, h * .31, h * .035, h * .22, 164, .12, .042);
+        auroraRibbon(3, h * .205, h * .042, h * .18, 282, -.095, .026);
+        ctx.save(); ctx.globalCompositeOperation = 'screen';
+        const haze = ctx.createRadialGradient(w * .48, h * .34, 0, w * .48, h * .34, w * .55);
+        haze.addColorStop(0, 'rgba(92,195,157,.04)'); haze.addColorStop(.55, 'rgba(124,75,178,.018)'); haze.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = haze; ctx.fillRect(0, 0, w, h); ctx.restore();
+      }
+
+      function spawnMeteor(forced = false) {
+        const leftward = Math.random() > .18;
+        const x = leftward ? rand(w * .52, w * .98) : rand(w * .06, w * .4);
+        const y = rand(h * .07, h * .38);
+        const length = rand(w * .075, w * .17) * (forced ? 1.15 : 1);
+        const angle = leftward ? rand(2.82, 3.5) : rand(-.38, .2);
+        meteors.push({ x, y, vx: Math.cos(angle) * rand(900, 1250), vy: Math.sin(angle) * rand(900, 1250), life: 0, max: rand(.58, .92), length, width: rand(1, 2.1), flare: Math.random() > .72 });
+      }
+
+      function drawMeteors(dt) {
+        for (let i = meteors.length - 1; i >= 0; i--) {
+          const m = meteors[i]; m.life += dt; m.x += m.vx * dt; m.y += m.vy * dt;
+          const p = clamp(m.life / m.max, 0, 1), fade = Math.sin(p * Math.PI);
+          const speed = Math.hypot(m.vx, m.vy), ux = m.vx / speed, uy = m.vy / speed;
+          const tx = m.x - ux * m.length, ty = m.y - uy * m.length;
+          ctx.save(); ctx.globalCompositeOperation = 'lighter';
+          const g = ctx.createLinearGradient(tx, ty, m.x, m.y);
+          g.addColorStop(0, 'rgba(115,180,255,0)');
+          g.addColorStop(.68, `rgba(180,220,255,${.28 * fade})`);
+          g.addColorStop(1, `rgba(255,249,227,${.98 * fade})`);
+          ctx.strokeStyle = g; ctx.lineWidth = m.width; ctx.shadowBlur = 10; ctx.shadowColor = 'rgba(150,210,255,.8)';
+          ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(m.x, m.y); ctx.stroke();
+          if (m.flare) { ctx.fillStyle = `rgba(255,235,190,${fade})`; ctx.beginPath(); ctx.arc(m.x, m.y, 2.6, 0, Math.PI * 2); ctx.fill(); }
+          ctx.restore();
+          if (m.life >= m.max) meteors.splice(i, 1);
+        }
+      }
+
+      function mountainPath(offset, base, scale, detail) {
+        ctx.beginPath(); ctx.moveTo(-30, h);
+        for (let x = -30; x <= w + 30; x += detail) {
+          const n = x / w;
+          const y = base - (Math.sin(n * 8.1 + offset) * .32 + Math.sin(n * 19.7 + offset * 1.7) * .14 + Math.max(0, Math.sin(n * 3.8 + offset)) * .7) * scale;
+          ctx.lineTo(x, y);
+        }
+        ctx.lineTo(w + 30, h); ctx.closePath();
+      }
+
+      function drawVillage() {
+        const base = h * .765;
+        const houses = [
+          { x: w * .13, y: base - 3, s: .72 },
+          { x: w * .19, y: base + 2, s: .94 },
+          { x: w * .27, y: base + 5, s: .63 },
+          { x: w * .34, y: base + 1, s: .78 }
+        ];
+        ctx.save();
+        for (const house of houses) {
+          const hs = Math.max(.55, Math.min(1.05, house.s * w / 1200));
+          ctx.save(); ctx.translate(house.x, house.y); ctx.scale(hs, hs);
+          // quiet amber halo in the snowy distance
+          const halo = ctx.createRadialGradient(0, -7, 0, 0, -7, 32);
+          halo.addColorStop(0, 'rgba(255,179,83,.16)'); halo.addColorStop(1, 'rgba(255,163,65,0)');
+          ctx.fillStyle = halo; ctx.fillRect(-34, -38, 68, 64);
+          ctx.fillStyle = '#55443d'; ctx.fillRect(-17, -15, 34, 22);
+          ctx.fillStyle = '#332d2e'; ctx.beginPath(); ctx.moveTo(-23, -15); ctx.lineTo(0, -32); ctx.lineTo(23, -15); ctx.closePath(); ctx.fill();
+          ctx.strokeStyle = 'rgba(232,246,244,.72)'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+          ctx.beginPath(); ctx.moveTo(-23, -16); ctx.lineTo(0, -33); ctx.lineTo(23, -16); ctx.stroke();
+          ctx.fillStyle = '#ffc27b'; ctx.shadowBlur = 11; ctx.shadowColor = '#ff9b42';
+          ctx.fillRect(-11, -9, 7, 7); ctx.fillRect(5, -9, 7, 7);
+          ctx.shadowBlur = 0; ctx.fillStyle = '#81533d'; ctx.fillRect(-2, -8, 5, 15);
+          ctx.restore();
+        }
+        ctx.restore();
+      }
+
+      function drawSnowfall(dt) {
+        ctx.save(); ctx.lineCap = 'round';
+        for (const f of flakes) {
+          f.y += f.vy * f.depth * dt;
+          f.x += Math.sin(time * .8 + f.phase) * f.drift * dt;
+          if (f.y > h + 6) { f.y = -6; f.x = Math.random() * w; }
+          if (f.x < -8) f.x = w + 6;
+          if (f.x > w + 8) f.x = -6;
+          ctx.strokeStyle = `rgba(240,250,252,${f.a})`;
+          ctx.lineWidth = f.r;
+          ctx.beginPath(); ctx.moveTo(f.x, f.y); ctx.lineTo(f.x - f.r * .8, f.y - f.r * 2.1); ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      function landscape() {
+        mountainPath(.7, h * .735, h * .12, 18); ctx.fillStyle = '#18343d'; ctx.fill();
+        ctx.save(); ctx.clip();
+        const mg = ctx.createLinearGradient(0, h * .56, 0, h * .78); mg.addColorStop(0, 'rgba(140,202,205,.38)'); mg.addColorStop(.45, 'rgba(82,136,148,.12)'); mg.addColorStop(1, 'rgba(0,13,22,.7)');
+        ctx.fillStyle = mg; ctx.fillRect(0, h * .5, w, h * .4); ctx.restore();
+
+        mountainPath(2.4, h * .79, h * .082, 13); ctx.fillStyle = '#8faeb4'; ctx.fill();
+        ctx.save(); ctx.clip();
+        const snowCap = ctx.createLinearGradient(0, h * .65, 0, h * .86); snowCap.addColorStop(0, 'rgba(225,240,239,.68)'); snowCap.addColorStop(.45, 'rgba(120,157,164,.18)'); snowCap.addColorStop(1, 'rgba(25,52,62,.5)');
+        ctx.fillStyle = snowCap; ctx.fillRect(0, h * .58, w, h * .35); ctx.restore();
+
+        drawVillage();
+
+        ctx.beginPath(); ctx.moveTo(0, h * .77);
+        for (let x = 0; x <= w; x += 22) ctx.lineTo(x, h * .79 + Math.sin(x * .012) * h * .013 + Math.cos(x * .026) * h * .007);
+        ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath();
+        const fg = ctx.createLinearGradient(0, h * .76, 0, h); fg.addColorStop(0, '#c5dde0'); fg.addColorStop(.5, '#b8d0d4'); fg.addColorStop(1, '#86a4aa');
+        ctx.fillStyle = fg; ctx.fill();
+
+        ctx.save(); ctx.globalAlpha = .36; ctx.strokeStyle = '#eefbfa'; ctx.lineWidth = 1;
+        for (let i = 0; i < 11; i++) { const yy = h * (.81 + i * .021); ctx.beginPath(); ctx.moveTo(rand(-50, w * .15), yy); ctx.bezierCurveTo(w * .35, yy - rand(2, 10), w * .62, yy + rand(2, 13), w + 30, yy - rand(1, 8)); ctx.stroke(); }
+        ctx.restore();
+
+        ctx.save();
+        for (const f of snow) {
+          f.x += Math.sin(time * .7 + f.y) * .03; f.y += f.s * .025;
+          if (f.y > h) f.y = h * .74;
+          ctx.fillStyle = `rgba(247,255,255,${f.a})`; ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      function camera() {
+        const s = clamp(w / 1200, .72, 1.22), x = w * .73, y = h * .79;
+        ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+        // soft shadow in snow
+        ctx.fillStyle = 'rgba(12,27,33,.24)'; ctx.beginPath(); ctx.ellipse(8, 118, 118, 15, -.05, 0, Math.PI * 2); ctx.fill();
+        // tripod legs
+        ctx.lineCap = 'round'; ctx.strokeStyle = '#172126'; ctx.lineWidth = 7;
+        ctx.beginPath(); ctx.moveTo(0, 25); ctx.lineTo(-70, 119); ctx.moveTo(2, 25); ctx.lineTo(79, 119); ctx.moveTo(3, 28); ctx.lineTo(8, 121); ctx.stroke();
+        ctx.strokeStyle = '#58656a'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(-3, 33); ctx.lineTo(-66, 116); ctx.moveTo(8, 34); ctx.lineTo(75, 116); ctx.moveTo(6, 38); ctx.lineTo(10, 117); ctx.stroke();
+        // feet pressed into snow
+        ctx.fillStyle = '#29363b'; [-70, 79, 8].forEach((xx, i) => { ctx.beginPath(); ctx.ellipse(xx, 120, i === 2 ? 10 : 13, 3.5, 0, 0, Math.PI * 2); ctx.fill(); });
+        // rear-facing camera body
+        ctx.fillStyle = '#11191d'; ctx.fillRect(-9, 13, 19, 19);
+        ctx.beginPath(); ctx.roundRect(-58, -36, 116, 62, 8); ctx.fill();
+        ctx.fillStyle = '#1b252a'; ctx.beginPath(); ctx.roundRect(37, -31, 27, 53, 7); ctx.fill();
+        // viewfinder hump and eyecup
+        ctx.fillStyle = '#182126'; ctx.beginPath(); ctx.roundRect(-20, -48, 41, 17, 5); ctx.fill();
+        ctx.fillStyle = '#070c0f'; ctx.beginPath(); ctx.roundRect(-12, -44, 25, 10, 4); ctx.fill();
+        // rear display bezel
+        ctx.fillStyle = '#050a0d'; ctx.beginPath(); ctx.roundRect(-45, -28, 72, 46, 4); ctx.fill();
+        ctx.save(); ctx.beginPath(); ctx.roundRect(-41, -24, 64, 38, 2); ctx.clip();
+        // live view: a miniature version of the aurora scene
+        const lcd = ctx.createLinearGradient(0, -24, 0, 14); lcd.addColorStop(0, '#031126'); lcd.addColorStop(.68, '#0b3540'); lcd.addColorStop(1, '#c2dfe0');
+        ctx.fillStyle = lcd; ctx.fillRect(-42, -25, 68, 42);
+        ctx.globalCompositeOperation = 'screen'; ctx.lineCap = 'round';
+        ctx.strokeStyle = 'rgba(83,255,167,.74)'; ctx.lineWidth = 5;
+        ctx.beginPath(); ctx.moveTo(-48, -12); ctx.bezierCurveTo(-22, -26, -2, -3, 29, -16); ctx.stroke();
+        ctx.strokeStyle = 'rgba(185,105,255,.36)'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(-49, -16); ctx.bezierCurveTo(-19, -31, 3, -7, 31, -22); ctx.stroke();
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = '#37505a'; ctx.beginPath(); ctx.moveTo(-45, 8); ctx.lineTo(-24, -1); ctx.lineTo(-6, 7); ctx.lineTo(8, 0); ctx.lineTo(29, 11); ctx.lineTo(29, 18); ctx.lineTo(-45, 18); ctx.closePath(); ctx.fill();
+        ctx.restore();
+        // rear controls and shutter button
+        ctx.fillStyle = '#354148';
+        [[41,-14,4],[51,-1,3.3],[43,10,3.3]].forEach(b => { ctx.beginPath(); ctx.arc(b[0], b[1], b[2], 0, Math.PI * 2); ctx.fill(); });
+        ctx.fillStyle = '#59676d'; ctx.beginPath(); ctx.ellipse(49, -35, 9, 3.6, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#cf5950'; ctx.beginPath(); ctx.arc(49, -35, 1.65, 0, Math.PI * 2); ctx.fill();
+        // snow dusting
+        ctx.fillStyle = 'rgba(224,241,239,.38)'; ctx.beginPath(); ctx.roundRect(-48, -37, 73, 3, 2); ctx.fill();
+        ctx.restore();
+      }
+
+      function cameraViewGeometry() {
+        const s = Math.min(w / 640, h / 480, 1.35);
+        const edge = Math.max(46, Math.min(62, Math.min(w, h) * .075));
+        return { s, x: w * .5, y: h * .56, shutterX: w * .5 + 202 * s, shutterY: h * .56 - 171 * s, backX: edge, backY: edge };
+      }
+
+      function drawCameraView() {
+        const g = cameraViewGeometry();
+        ctx.fillStyle = 'rgba(0,5,12,.57)'; ctx.fillRect(0, 0, w, h);
+        ctx.save(); ctx.translate(g.x, g.y); ctx.scale(g.s, g.s);
+        // full rear of the camera
+        ctx.shadowBlur = 45; ctx.shadowColor = 'rgba(0,0,0,.72)';
+        ctx.fillStyle = '#0d1418'; ctx.beginPath(); ctx.roundRect(-260, -145, 520, 294, 28); ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#192328'; ctx.beginPath(); ctx.roundRect(165, -125, 110, 245, 24); ctx.fill();
+        ctx.fillStyle = '#182126'; ctx.beginPath(); ctx.roundRect(-72, -188, 144, 49, 13); ctx.fill();
+        ctx.fillStyle = '#050a0c'; ctx.beginPath(); ctx.roundRect(-45, -178, 90, 31, 9); ctx.fill();
+        // large live-view screen
+        ctx.fillStyle = '#020609'; ctx.beginPath(); ctx.roundRect(-221, -110, 354, 203, 9); ctx.fill();
+        ctx.save(); ctx.beginPath(); ctx.roundRect(-211, -100, 334, 183, 4); ctx.clip();
+        const srcW = photoCanvas.width, srcH = photoCanvas.height;
+        const sourceRatio = srcW / srcH, targetRatio = 334 / 183;
+        let sx = 0, sy = 0, sw = srcW, sh = srcH;
+        if (sourceRatio > targetRatio) { sw = srcH * targetRatio; sx = (srcW - sw) / 2; }
+        else { sh = srcW / targetRatio; sy = (srcH - sh) / 2; }
+        ctx.drawImage(photoCanvas, sx, sy, sw, sh, -211, -100, 334, 183);
+        // quiet focus brackets, purely graphical
+        ctx.strokeStyle = 'rgba(215,255,230,.45)'; ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-62,-20); ctx.lineTo(-62,-39); ctx.lineTo(-43,-39);
+        ctx.moveTo(44,-39); ctx.lineTo(63,-39); ctx.lineTo(63,-20);
+        ctx.moveTo(63,8); ctx.lineTo(63,27); ctx.lineTo(44,27);
+        ctx.moveTo(-43,27); ctx.lineTo(-62,27); ctx.lineTo(-62,8); ctx.stroke();
+        ctx.restore();
+        // tactile rear controls
+        ctx.fillStyle = '#354147';
+        [[183,-73,15],[222,-25,12],[184,25,12],[222,72,12]].forEach(b => { ctx.beginPath(); ctx.arc(b[0], b[1], b[2], 0, Math.PI * 2); ctx.fill(); });
+        ctx.strokeStyle = '#4f5f66'; ctx.lineWidth = 7; ctx.beginPath(); ctx.arc(183, 72, 28, 0, Math.PI * 2); ctx.stroke();
+        // top plate and prominent shutter
+        ctx.fillStyle = '#121a1e'; ctx.beginPath(); ctx.roundRect(132, -179, 137, 46, 12); ctx.fill();
+        ctx.fillStyle = '#6e7b80'; ctx.beginPath(); ctx.ellipse(202, -171, 27, 12, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#b7403b'; ctx.beginPath(); ctx.ellipse(202, -172, 18, 7.5, 0, 0, Math.PI * 2); ctx.fill();
+        // snow caught along the top edge
+        ctx.strokeStyle = 'rgba(231,244,243,.52)'; ctx.lineWidth = 8; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(-232,-146); ctx.lineTo(-85,-146); ctx.moveTo(85,-146); ctx.lineTo(128,-146); ctx.stroke();
+        ctx.restore();
+
+        // high-contrast back control, intentionally wordless
+        ctx.save();
+        const pulse = .18 + Math.sin(time * 2.2) * .06;
+        ctx.shadowBlur = 24; ctx.shadowColor = 'rgba(91,255,190,.38)';
+        ctx.fillStyle = 'rgba(5,20,28,.92)'; ctx.beginPath(); ctx.arc(g.backX, g.backY, 28, 0, Math.PI * 2); ctx.fill();
+        ctx.shadowBlur = 0; ctx.strokeStyle = 'rgba(139,255,212,.9)'; ctx.lineWidth = 2.4; ctx.stroke();
+        ctx.strokeStyle = `rgba(139,255,212,${pulse})`; ctx.lineWidth = 7; ctx.beginPath(); ctx.arc(g.backX, g.backY, 36, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = '#e7fff6'; ctx.lineWidth = 3.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(g.backX + 10, g.backY); ctx.lineTo(g.backX - 10, g.backY);
+        ctx.moveTo(g.backX - 10, g.backY); ctx.lineTo(g.backX - 1, g.backY - 9);
+        ctx.moveTo(g.backX - 10, g.backY); ctx.lineTo(g.backX - 1, g.backY + 9);
+        ctx.stroke(); ctx.restore();
+      }
+
+      function closePhotoDialog() {
+        photoDialog.hidden = true;
+        if (photoUrl) URL.revokeObjectURL(photoUrl);
+        photoUrl = ''; photoFile = null; photoPreview.removeAttribute('src');
+      }
+
+      function takePhoto() {
+        shutterFlash = 1;
+        const shot = document.createElement('canvas');
+        shot.width = photoCanvas.width; shot.height = photoCanvas.height;
+        shot.getContext('2d').drawImage(photoCanvas, 0, 0);
+        setTimeout(() => shot.toBlob(blob => {
+          if (!blob) return;
+          photoFile = new File([blob], `aurora-${Date.now()}.png`, { type: 'image/png' });
+          photoUrl = URL.createObjectURL(blob);
+          photoPreview.src = photoUrl;
+          photoDialog.hidden = false;
+          savePhoto.focus();
+        }, 'image/png'), 230);
+      }
+
+      function frame(now) {
+        const dt = Math.min((now - last) / 1000, .033); last = now;
+        if (!reduceMotion) time += dt; else time = 2.1;
+        shutterFlash = Math.max(0, shutterFlash - dt * 3.2);
+        meteorClock -= dt;
+        if (meteorClock <= 0 && !reduceMotion) { spawnMeteor(); meteorClock = rand(9, 20); }
+        sky(); drawStars(); drawAurora(); drawMeteors(dt); landscape(); drawSnowfall(dt);
+        photoCtx.setTransform(1, 0, 0, 1, 0, 0);
+        photoCtx.clearRect(0, 0, photoCanvas.width, photoCanvas.height);
+        photoCtx.drawImage(canvas, 0, 0);
+        if (cameraMode) drawCameraView(); else camera();
+        if (shutterFlash > 0) {
+          ctx.fillStyle = `rgba(225,248,255,${Math.sin(shutterFlash * Math.PI) * .46})`;
+          ctx.fillRect(0, 0, w, h);
+        }
+        requestAnimationFrame(frame);
+      }
+
+      addEventListener('resize', resize, { passive: true });
+      canvas.addEventListener('pointerup', e => {
+        if (cameraMode) {
+          const g = cameraViewGeometry();
+          if (Math.hypot(e.clientX - g.backX, e.clientY - g.backY) <= 44) cameraMode = false;
+          else if (Math.hypot(e.clientX - g.shutterX, e.clientY - g.shutterY) <= 38 * g.s) takePhoto();
+          else if (Math.abs(e.clientX - g.x) > 290 * g.s || Math.abs(e.clientY - g.y) > 215 * g.s) cameraMode = false;
+          return;
+        }
+        const s = clamp(w / 1200, .72, 1.22), lx = (e.clientX - w * .73) / s, ly = (e.clientY - h * .79) / s;
+        if (lx >= -85 && lx <= 90 && ly >= -58 && ly <= 132) cameraMode = true;
+      });
+      discardPhoto.addEventListener('click', closePhotoDialog);
+      savePhoto.addEventListener('click', async () => {
+        if (!photoFile) return;
+        try {
+          if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [photoFile] }))) {
+            await navigator.share({ files: [photoFile] });
+          } else {
+            const link = document.createElement('a');
+            link.href = photoUrl; link.download = photoFile.name;
+            document.body.appendChild(link); link.click(); link.remove();
+          }
+          closePhotoDialog();
+        } catch (error) {
+          if (error && error.name !== 'AbortError') {
+            const link = document.createElement('a');
+            link.href = photoUrl; link.download = photoFile.name;
+            document.body.appendChild(link); link.click(); link.remove();
+          }
+        }
+      });
+      resize(); requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>
