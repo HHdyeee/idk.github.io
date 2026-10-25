@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AFF iframe 折叠测试</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body { background: #f8f6f1; color: #423a32; font-family: Georgia, 'Songti SC', SimSun, serif; }
+    main { width: 90%; max-width: 450px; margin: 18px auto 30px; }
+    p { line-height: 1.85; }
+    .hint { text-align: center; color: #847666; font-size: 13px; margin: 0 0 25px; }
+    details { width: 100%; }
+    summary { display: block; list-style: none; cursor: pointer; }
+    summary::-webkit-details-marker { display: none; }
+    .envelope { display: block; background: #f1e9dc; padding: 27px 25px 20px; border: 1px solid #cdbfa9; box-shadow: 4px 4px 0 #e4d9c8, 7px 7px 0 #dcd0bd; }
+    .recipient { display: block; text-align: center; font-size: 22px; letter-spacing: 0.15em; }
+    .sender { display: block; margin-top: 18px; text-align: right; font-size: 13px; color: #7a6d5e; }
+    .action { display: block; text-align: center; margin-top: 18px; color: #92816d; font-size: 12px; }
+    details[open] .action::after { content: '（已经展开，再点击信封可收起）'; }
+    .paper { background: #fffdf8; border: 1px solid #ddd2c2; margin: 18px 0 0; padding: 21px 22px; box-shadow: 3px 3px 0 #f1ebe0, 6px 6px 0 #e9e0d3; }
+    .result { padding-top: 12px; border-top: 1px solid #e7dfd5; font-size: 13px; color: #6d5b45; }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="hint">这是一个独立网页测试，不包含小说正文。</p>
+    <details>
+      <summary class="envelope">
+        <span class="recipient">金主训 收</span>
+        <span class="sender">严成贤</span>
+        <span class="action">点击拆信</span>
+      </summary>
+      <div class="paper">
+        <p>金主训，<br>见字如面。</p>
+        <p>如果现在能看见这张信纸，说明 GitHub Pages 页面里的 HTML 折叠功能正常。</p>
+        <p class="result">如果这张信纸是在 AFF 章节内部展开的，才表示 iframe 嵌入也成功了。</p>
+      </div>
+    </details>
+  </main>
+</body>
+</html>
