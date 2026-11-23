@@ -2055,7 +2055,7 @@ function buildDeck(key){
   let shared=1;
   for(const page of raw){
    const fits=(f,t)=>{
-    probe.innerHTML=page.html;applyInk(key,page.section,probe,f,t);
+    probe.innerHTML=page.html;applyInk(key,page.section,probe,f,t,true);
     return probe.scrollHeight<=probe.clientHeight;
    };
    const max=phone?1:shared;
@@ -2147,11 +2147,11 @@ function strength(key,i){
  // An's letter spans June through August; Kim's spans early August through August 11.
  return key==='a'?[0,.03,.07,.15,.25,.37,.51,.68,.85,1][i]:[.47,.60,.80,1][i];
 }
-function applyInk(key,i,target=ink,fit=1,tight=1){
+function applyInk(key,i,target=ink,fit=1,tight=1,measureOriginal=false){
  const t=strength(key,i);
  const rawScale=(key==='a'?[1,1,1.005,1.012,1.023,1.04,1.065,1.10,1.145,1.20]:[1.045,1.075,1.13,1.20])[i];
  const scale=1+(rawScale-1)*.78;
- target.style.setProperty('--hand-scale',String(scale));
+ target.style.setProperty('--hand-scale',String(scale*(measureOriginal?1:.96)));
  target.style.setProperty('--content-fit',String(fit));
  target.style.setProperty('--ink','#403329');
  target.style.setProperty('--tilt','0deg');
@@ -2160,9 +2160,12 @@ function applyInk(key,i,target=ink,fit=1,tight=1){
  target.style.setProperty('--paragraph-gap',String(.43*tight*tight)+'em');
  target.style.setProperty('--density',`${t*.022}em`);
  target.style.setProperty('--ink-weight','.13px');
- if(key==='a'&&i===3)markApology(target);
+ if(key==='a'&&i===3)markWaterPhrase(target,'别去纠结那20天','对不起');
+ if(key==='j'&&i===3)markWaterPhrase(target,'也请记住我们的快乐，而不是痛苦','而不是痛苦');
  if(key==='j'&&i===3)markSignatureInk(target.querySelector('.letter-sign'));
  const paragraphs=target.querySelectorAll('p');
+ const firstLove=key==='a'&&i===6?[...paragraphs].find(p=>p.textContent.trim()==='我爱你。'):null;
+ if(firstLove&&!measureOriginal)firstLove.style.fontSize=(1/.96)+'em';
  paragraphs.forEach((p,k)=>{
   const first=(p.firstChild?.textContent||'').trim();
   if(!p.textContent.trim())p.classList.add('letter-blank');
@@ -2241,14 +2244,14 @@ function markFarewellInk(p){
 function markSignatureInk(p){
  markWetText(p,{'Yours,':'light','Sean Eom':'medium','2041/8':'soft'},'signature-bloom');
 }
-function markApology(target){
- const paragraph=[...target.querySelectorAll('p')].find(p=>p.textContent.includes('别去纠结那20天'));
+function markWaterPhrase(target,context,phrase){
+ const paragraph=[...target.querySelectorAll('p')].find(p=>p.textContent.includes(context));
  if(!paragraph)return;
  const walker=document.createTreeWalker(paragraph,NodeFilter.SHOW_TEXT);
  while(walker.nextNode()){
-  const node=walker.currentNode,index=node.data.indexOf('对不起');
+  const node=walker.currentNode,index=node.data.indexOf(phrase);
   if(index<0)continue;
-  const match=node.splitText(index);match.splitText(3);
+  const match=node.splitText(index);match.splitText(phrase.length);
   const span=document.createElement('span');span.className='ink-bloom';span.textContent=match.data;
   match.replaceWith(span);break;
  }
